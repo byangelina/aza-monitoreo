@@ -1,0 +1,60 @@
+# Blueprint de Render para AZA (backend Express + frontend estático).
+# La base de datos NO se crea aquí: vive en Supabase (PostgreSQL) y se referencia por DATABASE_URL.
+services:
+  - type: web
+    name: aza-backend
+    runtime: node
+    rootDir: aza-backend
+    region: virginia # la más cercana a Supabase sa-east-1 entre las regiones de Render
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production
+      - key: DB_SSL
+        value: "true"
+      - key: DATABASE_URL # cadena de conexión de Supabase; se ingresa a mano en Render
+        sync: false
+      - key: FRONTEND_URL # URL pública del frontend (origen permitido por CORS); sin "/" final
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: RESET_TOKEN_SECRET
+        generateValue: true
+      - key: INGESTA_API_KEY
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 30m
+      - key: RESET_TOKEN_EXPIRES_IN
+        value: 30m
+      - key: ACCOUNT_LOCK_ATTEMPTS
+        value: "5"
+      - key: ACCOUNT_LOCK_MINUTES
+        value: "15"
+
+  - type: web
+    name: aza-frontend
+    runtime: static
+    rootDir: aza-frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: VITE_API_BASE_URL # URL pública del backend + /api
+        sync: false
+    routes:
+      - type: rewrite # React Router: cualquier ruta debe servir index.html
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff

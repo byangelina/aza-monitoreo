@@ -1,7 +1,7 @@
 const { Sequelize } = require('sequelize');
 const env = require('./env');
 
-const dialectOptions = env.db.ssl ? { ssl: { require: true, rejectUnauthorized: false } } : {};
+const dialectOptions = env.db.ssl ? { ssl: { require: true, rejectUnauthorized: true } } : {};
 
 const sequelize = env.db.url
   ? new Sequelize(env.db.url, {

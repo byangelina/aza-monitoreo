@@ -1,0 +1,47 @@
+const {Op}=require('sequelize');
+const {sequelize,Receta,Lote,Batch,Usuario,Rol,ReglaAlarma,Auditoria,Inspeccion}=require('../models');
+const v=require('../utils/validation');
+const {hashPassword,passwordPolicyError}=require('../utils/password');
+const TYPES=['Resultado rechazado','Sin receta','Rechazos consecutivos','Ángulo superior','Ángulo inferior'];
+async function audit(req,accion,tabla,id,transaction){await Auditoria.create({accionRealizada:`${accion} #${id}`,tablaAfectada:tabla,idUsuario:req.usuario.idUsuario,ipOrigen:req.ip},{transaction});}
+async function existing(Model,id,transaction){const item=await Model.findByPk(v.id(id),{transaction,lock:transaction.LOCK.UPDATE});if(!item)v.fail('Registro no encontrado.',404);return item;}
+async function write(req,res,Model,table,build){
+ const created=!req.params.id;
+ const item=await sequelize.transaction(async transaction=>{const current=created?null:await existing(Model,req.params.id,transaction);const values=await build(req.body,current,transaction);const result=current?await current.update(values,{transaction}):await Model.create(values,{transaction});await audit(req,created?'Creación':'Actualización',table,result.get(Model.primaryKeyAttribute),transaction);return result;});
+ res.status(created?201:200).json({id:item.get(Model.primaryKeyAttribute),message:'Cambios guardados.'});
+}
+async function recipes(req,res){const where={};if(req.query.q)where[Op.or]=[{nombreReceta:{[Op.iLike]:`%${req.query.q}%`}},{material:{[Op.iLike]:`%${req.query.q}%`}}];if(req.query.activa)where.estado=req.query.activa==='true';
+ const range=v.dates(req.query);if(range){const used=await Inspeccion.findAll({attributes:['idReceta'],where:{fechaHora:range},group:['idReceta']});where.idReceta={[Op.in]:used.map(i=>i.idReceta).filter(Boolean)};}
+ const pg=v.pagination(req.query);const {rows,count}=await Receta.findAndCountAll({where,order:[['nombreReceta','ASC']],limit:pg.limit,offset:pg.offset});res.json({items:rows,total:count,page:pg.page,pageSize:pg.pageSize});}
+async function saveRecipe(req,res){return write(req,res,Receta,'receta',async(body,current)=>{const min=v.number(body.anguloMin,'Ángulo mínimo'),max=v.number(body.anguloMax,'Ángulo máximo');if(min>=max)v.fail('El límite mínimo debe ser menor que el máximo.');return {nombreReceta:v.text(body.nombreReceta,'Nombre'),material:v.text(body.material,'Material',50),espesorObjetivo:v.number(body.espesorObjetivo,'Espesor',0.01,999.99),anguloMin:min,anguloMax:max,estado:body.estado===undefined?(current?.estado??true):v.bool(body.estado),idUsuario:current?.idUsuario||req.usuario.idUsuario,fechaModificacion:current?new Date():null};});}
+async function lots(req,res){const where={};if(req.query.idReceta)where.idReceta=v.id(req.query.idReceta);if(req.query.estado)where.estado=req.query.estado;const range=v.dates(req.query);if(range)where.fechaInicio=range;if(req.query.q)where.codigoLote={[Op.iLike]:`%${req.query.q}%`};const pg=v.pagination(req.query);const {rows,count}=await Lote.findAndCountAll({where,include:[{model:Receta,as:'receta'}],order:[['fechaInicio','DESC'],['idLote','DESC']],limit:pg.limit,offset:pg.offset});res.json({items:rows,total:count,page:pg.page,pageSize:pg.pageSize});}
+async function saveLot(req,res){return write(req,res,Lote,'lote',async(body,current,transaction)=>{
+ if(current?.estado==='Cerrado')v.fail('Reabre el lote antes de modificar sus datos.',409);
+ const recipe=await existing(Receta,body.idReceta,transaction);if(!recipe.estado)v.fail('Selecciona una receta activa.');
+ if(current&&current.idReceta!==recipe.idReceta&&await Batch.count({where:{idLote:current.idLote},transaction}))v.fail('La receta no puede cambiar cuando el lote ya tiene batches.',409);
+ const codigo=current?current.codigoLote:v.text(body.codigoLote,'Código de lote',50);
+ const inicio=current?.fechaInicio||new Date();let fin=null;if(body.fechaFinEstimada){fin=new Date(body.fechaFinEstimada);if(!Number.isFinite(+fin)||fin<inicio)v.fail('La fecha estimada debe ser posterior al inicio.');}
+ return {codigoLote:codigo,idReceta:recipe.idReceta,fechaInicio:inicio,fechaFinEstimada:fin,estado:current?.estado||'Abierto'};
+ });}
+async function lotState(req,res){if(!['Abierto','Cerrado'].includes(req.body.estado))v.fail('Estado de lote inválido.');await sequelize.transaction(async transaction=>{const item=await existing(Lote,req.params.id,transaction);await item.update({estado:req.body.estado},{transaction});await audit(req,`Lote ${req.body.estado}`,'lote',item.idLote,transaction);});res.json({message:'Estado actualizado.'});}
+async function batches(req,res){const where={};if(req.query.idLote)where.idLote=v.id(req.query.idLote);const pg=v.pagination(req.query);const {rows,count}=await Batch.findAndCountAll({where,include:[{model:Lote,as:'lote'}],order:[['fechaProcesamiento','DESC'],['idBatch','DESC']],limit:pg.limit,offset:pg.offset});res.json({items:rows,total:count,page:pg.page,pageSize:pg.pageSize});}
+async function saveBatch(req,res){return write(req,res,Batch,'batch',async(body,current,transaction)=>{const observation=body.observacion? v.text(body.observacion,'Observación',500):null;if(current)return {observacion:observation};const lot=await existing(Lote,body.idLote,transaction);if(lot.estado!=='Abierto')v.fail('El lote está cerrado; no admite nuevos batches.',409);return {numeroBatch:v.text(body.numeroBatch,'Número de batch',50),idLote:lot.idLote,observacion:observation};});}
+const PUBLIC_USER=['idUsuario','nombreCompleto','correo','estado','idRol','fechaCreacion','intentosFallidos','bloqueadoHasta','debeCambiarPassword'];
+async function users(req,res){const where={};if(req.query.idRol)where.idRol=v.id(req.query.idRol);if(req.query.estado)where.estado=req.query.estado==='true';if(req.query.q)where[Op.or]=[{nombreCompleto:{[Op.iLike]:`%${req.query.q}%`}},{correo:{[Op.iLike]:`%${req.query.q}%`}}];const pg=v.pagination(req.query);const {rows,count}=await Usuario.findAndCountAll({where,attributes:PUBLIC_USER,include:[{model:Rol,as:'rol'}],order:[['nombreCompleto','ASC']],limit:pg.limit,offset:pg.offset});res.json({items:rows,total:count,page:pg.page,pageSize:pg.pageSize});}
+async function roles(req,res){res.json({items:await Rol.findAll({order:[['idRol','ASC']]})});}
+async function saveUser(req,res){return write(req,res,Usuario,'usuario',async(body,current,transaction)=>{
+ // Serialize administrator changes to prevent concurrent removal of the last administrator.
+ await sequelize.query('SELECT pg_advisory_xact_lock(8123001)',{transaction});
+ const role=await Rol.findByPk(v.id(body.idRol),{transaction});if(!role)v.fail('Rol inválido.');const estado=body.estado===undefined?(current?.estado??true):v.bool(body.estado);
+ if(current?.idUsuario===req.usuario.idUsuario&&(!estado||role.nombreRol!=='Administrador'))v.fail('No puedes desactivar tu propia cuenta ni quitarte el rol de Administrador.',409);
+ if(current){const adminRole=await Rol.findOne({where:{nombreRol:'Administrador'},transaction});if(current.idRol===adminRole.idRol&&(!estado||role.idRol!==adminRole.idRol)&&await Usuario.count({where:{idRol:adminRole.idRol,estado:true},transaction})<=1)v.fail('Debe permanecer un Administrador activo.',409);}
+ const values={nombreCompleto:v.text(body.nombreCompleto,'Nombre'),correo:v.text(body.correo,'Correo').toLowerCase(),idRol:role.idRol,estado};if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.correo))v.fail('Correo inválido.');
+ if(!current){const err=passwordPolicyError(body.password||'');if(err)v.fail(err);values.passwordHash=await hashPassword(body.password);values.debeCambiarPassword=true;}
+ else if(current.idRol!==role.idRol||current.estado!==estado)values.sessionVersion=current.sessionVersion+1;
+ return values;
+ });}
+async function unlock(req,res){await sequelize.transaction(async transaction=>{const item=await existing(Usuario,req.params.id,transaction);await item.update({intentosFallidos:0,bloqueadoHasta:null},{transaction});await audit(req,'Desbloqueo','usuario',item.idUsuario,transaction);});res.json({message:'Cuenta desbloqueada.'});}
+async function rules(req,res){res.json({items:await ReglaAlarma.findAll({order:[['idRegla','ASC']]}),types:TYPES});}
+async function saveRule(req,res){return write(req,res,ReglaAlarma,'regla_alarma',async(body,current)=>{if(!TYPES.includes(body.tipoRegla))v.fail('Tipo de regla no admitido.');const count=body.tipoRegla==='Rechazos consecutivos'?v.id(body.cantidadEventos):null;if(count>1000)v.fail('El máximo es 1000 eventos.');return {nombreRegla:v.text(body.nombreRegla,'Nombre'),tipoRegla:body.tipoRegla,valorUmbral:body.tipoRegla.startsWith('Ángulo')?v.number(body.valorUmbral,'Umbral'):null,cantidadEventos:count,activo:v.bool(body.activo),idUsuario:current?.idUsuario||req.usuario.idUsuario};});}
+async function audits(req,res){const where={};if(req.query.idUsuario)where.idUsuario=v.id(req.query.idUsuario);if(req.query.accion)where.accionRealizada={[Op.iLike]:`%${req.query.accion}%`};const range=v.dates(req.query);if(range)where.fechaHora=range;const pg=v.pagination(req.query);const {rows,count}=await Auditoria.findAndCountAll({where,include:[{model:Usuario,as:'usuario',attributes:['idUsuario','nombreCompleto']}],order:[['fechaHora',req.query.orden==='asc'?'ASC':'DESC'],['idAuditoria','DESC']],limit:pg.limit,offset:pg.offset});res.json({items:rows,total:count,page:pg.page,pageSize:pg.pageSize});}
+module.exports={recipes,saveRecipe,lots,saveLot,lotState,batches,saveBatch,users,roles,saveUser,unlock,rules,saveRule,audits};

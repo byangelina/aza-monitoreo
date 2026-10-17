@@ -1,0 +1,11 @@
+const {Router}=require('express');
+const c=require('../controllers/managementController');const {requireAuth,requirePasswordAlreadyChanged,requireRole}=require('../middleware/auth');const {asyncHandler:a}=require('../utils/asyncHandler');
+const router=Router();router.use(requireAuth,requirePasswordAlreadyChanged);
+const admin=requireRole('Administrador'),read=requireRole('Administrador','Supervisor','Área de Calidad');
+router.get('/recetas',requireRole('Administrador','Supervisor'),a(c.recipes));router.post('/recetas',admin,a(c.saveRecipe));router.put('/recetas/:id',admin,a(c.saveRecipe));
+router.get('/lotes',read,a(c.lots));router.post('/lotes',admin,a(c.saveLot));router.put('/lotes/:id',admin,a(c.saveLot));router.patch('/lotes/:id/estado',admin,a(c.lotState));
+router.get('/batches',read,a(c.batches));router.post('/batches',admin,a(c.saveBatch));router.put('/batches/:id',admin,a(c.saveBatch));
+router.get('/usuarios',admin,a(c.users));router.get('/roles',admin,a(c.roles));router.post('/usuarios',admin,a(c.saveUser));router.put('/usuarios/:id',admin,a(c.saveUser));router.post('/usuarios/:id/desbloquear',admin,a(c.unlock));
+router.get('/reglas',admin,a(c.rules));router.post('/reglas',admin,a(c.saveRule));router.put('/reglas/:id',admin,a(c.saveRule));router.get('/auditoria',admin,a(c.audits));
+router.delete(['/lotes/:id','/batches/:id','/recetas/:id','/usuarios/:id'],admin,(req,res)=>res.status(409).json({error:'La eliminación física está deshabilitada para conservar la trazabilidad. Utiliza cierre o desactivación.'}));
+module.exports=router;

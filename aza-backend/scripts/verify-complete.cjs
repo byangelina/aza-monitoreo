@@ -1,0 +1,55 @@
+const assert=require('node:assert/strict'),fs=require('fs');
+const env=require('../src/config/env'),db=require('../src/config/database');
+if(env.db.url||env.db.host!=='127.0.0.1'||env.db.name!=='aza_pruebas')throw new Error('Esta prueba solo se permite en aza_pruebas local.');
+const checks=[],base='http://127.0.0.1:4000/api',tag='QA'+Date.now();
+async function request(path,{token,body,key,method='GET',status=200,raw=false}={}){
+ const r=await fetch(base+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{}),...(key?{'x-api-key':key}:{})},...(body?{body:JSON.stringify(body)}:{})});
+ const bytes=Buffer.from(await r.arrayBuffer());let data={};if(!raw&&bytes.length)data=JSON.parse(bytes.toString());assert.equal(r.status,status,`${method} ${path}: ${raw?'':JSON.stringify(data)}`);return raw?bytes:data;
+}
+const pass=title=>{checks.push(title);console.log('OK',title);};
+async function login(correo,password='Demo2026!'){return request('/auth/login',{method:'POST',body:{correo,password}});}
+(async()=>{
+ const admin=(await login('admin@demo.example')).token,supervisor=(await login('supervisor@demo.example')).token,quality=(await login('calidad@demo.example')).token,operator=(await login('operador@demo.example')).token;
+ pass('Cuatro roles acceden con sesión real');
+ await request('/gestion/usuarios',{token:operator,status:403});await request('/gestion/usuarios',{token:quality,status:403});await request('/inspecciones',{token:admin,status:403});await request('/gestion/auditoria',{token:supervisor,status:403});pass('Permisos de API por rol');
+ const recipeBody={nombreReceta:tag,material:'Acero QA',espesorObjetivo:6,anguloMin:270,anguloMax:280,estado:true};
+ await request('/gestion/recetas',{token:admin,method:'POST',body:{...recipeBody,anguloMin:290},status:400});
+ const recipe=await request('/gestion/recetas',{token:admin,method:'POST',body:recipeBody,status:201});await request('/gestion/recetas',{token:admin,method:'POST',body:recipeBody,status:409});
+ await request('/gestion/recetas',{token:quality,method:'POST',body:recipeBody,status:403});pass('Recetas: creación, límites, duplicados y permisos');
+ const lotBody={codigoLote:tag,idReceta:recipe.id,fechaFinEstimada:null};const lot=await request('/gestion/lotes',{token:admin,method:'POST',body:lotBody,status:201});
+ const batch=await request('/gestion/batches',{token:admin,method:'POST',body:{numeroBatch:tag,idLote:lot.id,observacion:'Batch QA'},status:201});
+ await request('/gestion/batches/'+batch.id,{token:admin,method:'PUT',body:{observacion:'Contexto actualizado'}});
+ await request('/gestion/lotes/'+lot.id+'/estado',{token:admin,method:'PATCH',body:{estado:'Cerrado'}});
+ await request('/gestion/batches',{token:admin,method:'POST',body:{numeroBatch:tag+'-X',idLote:lot.id},status:409});
+ await request('/gestion/lotes/'+lot.id,{token:admin,method:'PUT',body:lotBody,status:409});
+ await request('/gestion/lotes/'+lot.id+'/estado',{token:admin,method:'PATCH',body:{estado:'Abierto'}});pass('Lotes y batches: persistencia, edición, cierre y reapertura');
+ const rule=await request('/gestion/reglas',{token:admin,method:'POST',body:{nombreRegla:tag,tipoRegla:'Rechazos consecutivos',cantidadEventos:2,activo:true},status:201});
+ const ingress={angulo:276.54,estado:'RECHAZADO',receta:tag,lote:tag,carpeta:tag,operador:'QA LOCAL',referencia:tag+'-1'};
+ const first=(await request('/ingesta/inspecciones',{key:env.ingesta.apiKey,method:'POST',body:ingress,status:201})).item;
+ const repeated=await request('/ingesta/inspecciones',{key:env.ingesta.apiKey,method:'POST',body:ingress});assert.equal(repeated.item.id,first.id);assert.equal(repeated.replayed,true);
+ const second=(await request('/ingesta/inspecciones',{key:env.ingesta.apiKey,method:'POST',body:{...ingress,referencia:tag+'-2'},status:201})).item;
+ const alarms=(await request('/alarmas',{token:operator})).items;const alarm=alarms.find(a=>a.regla?.id===rule.id&&a.inspeccionId===second.id);assert.ok(alarm);assert.equal(alarms.filter(a=>a.regla?.id===rule.id&&a.inspeccionId===first.id).length,0);
+ await request('/alarmas/'+alarm.id+'/reconocer',{token:admin,method:'POST',status:403});await request('/alarmas/'+alarm.id+'/reconocer',{token:operator,method:'POST'});await request('/alarmas/'+alarm.id+'/reconocer',{token:operator,method:'POST'});pass('Ingesta idempotente y reglas consecutivas, reconocimiento autorizado');
+ await request('/gestion/recetas/'+recipe.id,{token:admin,method:'PUT',body:{...recipeBody,anguloMin:260,anguloMax:290}});
+ const detail=(await request('/inspecciones/'+first.id,{token:quality})).item;assert.equal(detail.limiteMin,270);assert.equal(detail.limiteMax,280);assert.equal(detail.estado,'Rechazado');
+ await request('/gestion/batches/'+batch.id,{token:admin,method:'DELETE',status:409});await request('/gestion/lotes/'+lot.id,{token:admin,method:'DELETE',status:409});pass('Snapshots históricos y protección contra eliminación');
+ await Promise.all(['Primera nota','Segunda nota'].map(texto=>request(`/inspecciones/${first.id}/observaciones`,{token:operator,method:'POST',body:{texto}})));
+ const observed=(await request('/inspecciones/'+first.id,{token:quality})).item;assert.ok(observed.observacion.includes('Primera nota')&&observed.observacion.includes('Segunda nota'));pass('Observaciones concurrentes sin pérdida');
+ const history=await request(`/inspecciones?idLote=${lot.id}&idBatch=${batch.id}&estado=Rechazado&pageSize=1&orden=asc`,{token:quality});assert.equal(history.total,2);assert.equal(history.items.length,1);assert.equal(history.items[0].id,first.id);
+ await request('/inspecciones?desde=2026-12-31&hasta=2026-01-01',{token:quality,status:400});await request('/inspecciones?page=abc',{token:quality,status:400});pass('Histórico paginado, filtros combinados, orden y validación');
+ const report=await request('/reportes?idLote='+lot.id,{token:supervisor});assert.equal(report.summary.total,2);assert.equal(report.summary.rechazadas,2);
+ const csv=await request('/reportes?idLote='+lot.id+'&formato=csv',{token:quality,raw:true});assert.ok(csv.toString().includes(tag));
+ const pdf=await request('/reportes?idLote='+lot.id+'&formato=pdf',{token:quality,raw:true});assert.ok(pdf.subarray(0,4).toString()==='%PDF');fs.writeFileSync('../.local/reporte-verificado.pdf',pdf);pass('Reporte filtrado, CSV y PDF reales');
+ const roles=(await request('/gestion/roles',{token:admin})).items;const role=roles.find(r=>r.nombreRol==='Operador');const account={nombreCompleto:tag,correo:tag.toLowerCase()+'@demo.example',idRol:role.idRol,password:'Temporal2026!',estado:true};
+ const created=await request('/gestion/usuarios',{token:admin,method:'POST',body:account,status:201});const temp=await login(account.correo,account.password);assert.equal(temp.user.debeCambiarPassword,true);await request('/inspecciones/recientes',{token:temp.token,status:403});
+ const changed=await request('/auth/cambiar-password',{token:temp.token,method:'POST',body:{passwordActual:account.password,passwordNueva:'Definitiva2026!'}});await request('/auth/me',{token:temp.token,status:401});await request('/inspecciones/recientes',{token:changed.token});
+ for(let n=0;n<5;n++)await request('/auth/login',{method:'POST',body:{correo:account.correo,password:'Incorrecta2026!'},status:401});
+ await request('/auth/login',{method:'POST',body:{correo:account.correo,password:'Definitiva2026!'},status:423});await request('/gestion/usuarios/'+created.id+'/desbloquear',{token:admin,method:'POST'});
+ const unlocked=await login(account.correo,'Definitiva2026!');assert.ok(unlocked.token);pass('Usuarios, cambio inicial obligatorio, bloqueo y desbloqueo');
+ const recovery=await request('/auth/recuperar',{method:'POST',body:{correo:account.correo}});assert.ok(recovery.localPreview);const reset=new URL(recovery.previewUrl).searchParams.get('token');
+ await request('/auth/restablecer',{method:'POST',body:{token:reset,password:'Recuperada2026!'}});await request('/auth/restablecer',{method:'POST',body:{token:reset,password:'OtraClave2026!'},status:400});await request('/auth/me',{token:unlocked.token,status:401});pass('Recuperación local, enlace de un solo uso e invalidación de sesiones');
+ const active=await login(account.correo,'Recuperada2026!');await request('/gestion/usuarios/'+created.id,{token:admin,method:'PUT',body:{...account,estado:false}});await request('/auth/me',{token:active.token,status:401});await request('/auth/login',{method:'POST',body:{correo:account.correo,password:'Recuperada2026!'},status:401});pass('Baja lógica de usuario conserva histórico y revoca sesión');
+ const audits=await request('/gestion/auditoria?accion=Creaci%C3%B3n',{token:admin});assert.ok(audits.total>0);assert.ok(!JSON.stringify(audits).includes('passwordHash'));
+ const self=(await request('/auth/me',{token:admin})).user;await request('/gestion/usuarios/'+self.id,{token:admin,method:'PUT',body:{nombreCompleto:self.nombre,correo:self.correo,idRol:roles.find(r=>r.nombreRol==='Administrador').idRol,estado:false},status:409});pass('Auditoría de solo lectura y protección del administrador');
+ fs.writeFileSync('../.local/verificacion-completa.json',JSON.stringify({at:new Date().toISOString(),database:'aza_pruebas',passed:checks,tag},null,2));console.log('TOTAL:',checks.length,'grupos aprobados');
+})().catch(e=>{console.error(e.stack);process.exitCode=1;}).finally(()=>db.close());

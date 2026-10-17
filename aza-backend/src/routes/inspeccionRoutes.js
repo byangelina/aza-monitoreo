@@ -10,10 +10,10 @@ router.use(requireAuth, requirePasswordAlreadyChanged);
 router.get('/recientes', requireRole('Operador'), asyncHandler(controller.listarRecientes));
 
 // Supervisor, Área de Calidad y Administrador: histórico filtrado y trazabilidad.
-router.get('/', requireRole('Supervisor', 'Área de Calidad', 'Administrador'), asyncHandler(controller.listarHistorico));
+router.get('/', requireRole('Supervisor', 'Área de Calidad'), asyncHandler(controller.listarHistorico));
 
 // Detalle: cualquier rol autenticado (lo usan tanto el panel del Operador como el del Supervisor).
-router.get('/:id', asyncHandler(controller.obtenerDetalle));
+router.get('/:id', requireRole('Operador','Supervisor','Área de Calidad'), asyncHandler(controller.obtenerDetalle));
 
 // RF012: agregar observación — función exclusiva del Operador.
 router.post('/:id/observaciones', requireRole('Operador'), asyncHandler(controller.agregarObservacion));

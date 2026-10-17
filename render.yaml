@@ -8,7 +8,7 @@ services:
     region: virginia # la más cercana a Supabase sa-east-1 entre las regiones de Render
     plan: free
     buildCommand: npm ci
-    startCommand: npm start
+    startCommand: npm run db:migrate && npm start
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
@@ -30,7 +30,7 @@ services:
       - key: JWT_EXPIRES_IN
         value: 30m
       - key: RESET_TOKEN_EXPIRES_IN
-        value: 30m
+        value: 10m
       - key: ACCOUNT_LOCK_ATTEMPTS
         value: "5"
       - key: ACCOUNT_LOCK_MINUTES

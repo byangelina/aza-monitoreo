@@ -12,6 +12,7 @@ function signAccessToken(usuario) {
   const token = jwt.sign(
     {
       jti,
+      version: usuario.sessionVersion,
       sub: usuario.idUsuario,
       correo: usuario.correo,
       rol: usuario.rol?.nombreRol,
@@ -38,7 +39,7 @@ function revokeToken(payload) {
 // Token de restablecimiento de contraseña: firmado aparte, corta duración, sin
 // persistir nada en base de datos (evita añadir columnas fuera del diccionario de datos).
 function signResetToken(usuario) {
-  return jwt.sign({ sub: usuario.idUsuario, purpose: 'password-reset' }, env.auth.resetSecret, {
+  return jwt.sign({ sub: usuario.idUsuario, purpose: 'password-reset', jti:crypto.randomUUID() }, env.auth.resetSecret, {
     expiresIn: env.auth.resetExpiresIn,
   });
 }

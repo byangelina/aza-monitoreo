@@ -1,7 +1,7 @@
 require('dotenv').config();
 
 function required(name, fallback) {
-  const value = process.env[name] ?? fallback;
+  const value = process.env[name] ?? (process.env.NODE_ENV==='production'?undefined:fallback);
   if (value === undefined) throw new Error(`Falta la variable de entorno ${name}`);
   return value;
 }
@@ -25,7 +25,7 @@ module.exports = {
     jwtSecret: required('JWT_SECRET', 'dev-only-insecure-secret-change-me'),
     jwtExpiresIn: process.env.JWT_EXPIRES_IN || '30m',
     resetSecret: required('RESET_TOKEN_SECRET', 'dev-only-insecure-reset-secret-change-me'),
-    resetExpiresIn: process.env.RESET_TOKEN_EXPIRES_IN || '30m',
+    resetExpiresIn: process.env.RESET_TOKEN_EXPIRES_IN || '10m',
     bcryptSaltRounds: Number(process.env.BCRYPT_SALT_ROUNDS || 12),
     lockAttempts: Number(process.env.ACCOUNT_LOCK_ATTEMPTS || 5),
     lockMinutes: Number(process.env.ACCOUNT_LOCK_MINUTES || 15),

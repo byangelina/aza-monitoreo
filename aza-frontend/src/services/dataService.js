@@ -9,11 +9,11 @@ function toRecipeShape(r) {
 }
 
 function toLotShape(l) {
-  return { id: l.codigo, recipeId: l.recetaId === null || l.recetaId === undefined ? null : String(l.recetaId), status: l.estado };
+  return { id: l.codigo, dbId:l.id, recipeId: l.recetaId === null || l.recetaId === undefined ? null : String(l.recetaId), status: l.estado };
 }
 
 function toBatchShape(b, codigoPorIdLote) {
-  return { id: b.numero, lotId: codigoPorIdLote[b.loteId] || null, observation: b.observacion || '' };
+  return { id: b.numero, dbId:b.id, loteDbId:b.loteId, lotId: codigoPorIdLote[b.loteId] || null, observation: b.observacion || '' };
 }
 
 // El backend guarda varias observaciones concatenadas como líneas "[usuario · fecha] texto"
@@ -34,10 +34,12 @@ const parseInspectionId = (displayId) => Number(String(displayId).replace('INS-'
 const formatAlarmId = (id) => `ALM-${String(id).padStart(3, '0')}`;
 const parseAlarmId = (displayId) => Number(String(displayId).replace('ALM-', ''));
 
-function toInspectionShape(i) {
+export function toInspectionShape(i) {
   return {
     id: formatInspectionId(i.id),
     date: i.fechaHora,
+    analysisImage: i.imagenAnalisisUrl || null,
+    captureImage: i.imagenCapturaUrl || null,
     angle: i.angulo,
     status: i.estado, // dato de origen: nunca se recalcula desde el ángulo en el frontend.
     recipeId: i.receta ? String(i.receta.id) : null,
@@ -59,6 +61,8 @@ function toAlarmShape(a) {
     description: a.descripcion,
     status: a.estado,
     date: a.fechaGeneracion,
+    acknowledgedAt:a.fechaReconocimiento,
+    acknowledgedBy:a.reconocidaPor?.nombre,
     userId: a.reconocidaPor ? a.reconocidaPor.id : null,
   };
 }
@@ -77,12 +81,23 @@ async function cargarCatalogo() {
   };
 }
 
+async function cargarHistoricoCompleto() {
+  const items=[];
+  // Freeze the upper timestamp so new arrivals do not shift page offsets.
+  const hasta=new Date().toISOString();
+  for(let page=1;;page++) {
+    const {data}=await api.get('/inspecciones',{params:{pageSize:200,page,hasta}});
+    items.push(...data.items);
+    if(items.length>=data.total||!data.items.length)break;
+  }
+  return [...new Map(items.map(i=>[i.id,i])).values()];
+}
 async function cargarInspeccionesYAlarmas(rol) {
-  const inspeccionesReq = rol === 'Operador'
+  const inspeccionesReq = rol === 'Administrador' ? Promise.resolve([]) : rol === 'Operador'
     ? api.get('/inspecciones/recientes', { params: { horas: 8 } }).then((r) => r.data.items)
-    : api.get('/inspecciones', { params: { pageSize: 200 } }).then((r) => r.data.items);
+    : cargarHistoricoCompleto();
 
-  const alarmasReq = ['Operador', 'Supervisor'].includes(rol)
+  const alarmasReq = ['Operador', 'Supervisor','Administrador'].includes(rol)
     ? api.get('/alarmas').then((r) => r.data.items)
     : Promise.resolve([]);
 
@@ -91,6 +106,7 @@ async function cargarInspeccionesYAlarmas(rol) {
 }
 
 export const dataService = {
+  async detail(id) {const {data}=await api.get(`/inspecciones/${parseInspectionId(id)}`);return toInspectionShape(data.item);},
   async load(user) {
     const [{ recipes, lots, batches }, { inspections, alarms }] = await Promise.all([
       cargarCatalogo(),

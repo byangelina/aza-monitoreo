@@ -10,7 +10,7 @@ async function requireAuth(req, res, next) {
   try {
     const payload = verifyAccessToken(token);
     const usuario = await Usuario.findByPk(payload.sub, { include: { model: Rol, as: 'rol' } });
-    if (!usuario || !usuario.estado) {
+    if (!usuario || !usuario.estado || payload.version !== usuario.sessionVersion) {
       return res.status(401).json({ error: 'La sesión ya no es válida.' });
     }
     req.tokenPayload = payload;

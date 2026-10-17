@@ -1,4 +1,4 @@
-export const ROLE_HOME = { Operador: '/operador', Supervisor: '/supervisor', Administrador: '/etapa-pendiente', 'Área de Calidad': '/etapa-pendiente' };
+export const ROLE_HOME = { Operador: '/operador', Supervisor: '/supervisor', Administrador: '/admin', 'Área de Calidad': '/calidad' };
 export const ROLES = Object.keys(ROLE_HOME);
 export const TIME_ZONE = 'America/Santiago';
 export const dateKey = value => new Intl.DateTimeFormat('en-CA', {timeZone: TIME_ZONE, year:'numeric', month:'2-digit', day:'2-digit'}).format(new Date(value));

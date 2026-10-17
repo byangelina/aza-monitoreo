@@ -8,7 +8,7 @@ export function MetricCard({label,value,note,icon:Icon,tone='blue'}) {return <ar
 export function FormField({label,error,hint,children,id,...props}) {const generated=useId();const inputId=id||generated;return <div className="form-field"><label htmlFor={inputId}>{label}</label>{children||<input id={inputId} aria-invalid={!!error} aria-describedby={error?`${inputId}-error`:hint?`${inputId}-hint`:undefined} {...props}/>} {hint&&<small id={`${inputId}-hint`}>{hint}</small>}{error&&<small className="field-error" id={`${inputId}-error`}>{error}</small>}</div>;}
 export function FilterBar({children}) {return <div className="filter-bar">{children}</div>;}
 export function EmptyState({title='No hay registros',description='Prueba con otro período o ajusta los filtros.',action}) {return <div className="empty-state"><Inbox size={32}/><h3>{title}</h3><p>{description}</p>{action}</div>;}
-export function LoadingState() {return <div className="loading-state" role="status"><LoaderCircle className="spin" size={26}/><p>Cargando datos de demostración…</p></div>;}
+export function LoadingState() {return <div className="loading-state" role="status"><LoaderCircle className="spin" size={26}/><p>Cargando datos…</p></div>;}
 export function ErrorState({message,onRetry}) {return <div className="error-state" role="alert"><AlertCircle size={22}/><p>{message}</p>{onRetry&&<Button variant="secondary" onClick={onRetry}>Reintentar</Button>}</div>;}
 export function Modal({open,onClose,title,children,wide=false}) {
   const ref=useRef(null);const titleId=useId();

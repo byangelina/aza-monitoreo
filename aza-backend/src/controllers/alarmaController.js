@@ -21,6 +21,7 @@ async function listar(req, res) {
   const where = {};
   if (estado) where.estadoAlarma = estado;
   if (tipo) where.tipoEvento = tipo;
+  const range=require('../utils/validation').dates(req.query);if(range)where.fechaGeneracion=range;
 
   const items = await Alarma.findAll({
     where,
@@ -35,17 +36,15 @@ async function listar(req, res) {
 
 // HU40: reconocer una alarma registra usuario y fecha; el resultado de la inspección no cambia.
 async function reconocer(req, res) {
-  const alarma = await Alarma.findByPk(req.params.id);
-  if (!alarma) return res.status(404).json({ error: 'No se encontró la alarma.' });
-
-  if (alarma.estadoAlarma === 'Activa') {
-    alarma.estadoAlarma = 'Reconocida';
-    alarma.idUsuario = req.usuario.idUsuario;
-    alarma.fechaReconocimiento = new Date();
-    await alarma.save();
-    await registrarAuditoria({ accion: 'Alarma reconocida', tabla: 'alarma', idUsuario: req.usuario.idUsuario, ip: req.ip });
-  }
-
+  const {sequelize,Auditoria}=require('../models');
+  const alarma=await sequelize.transaction(async transaction=>{
+    const item=await Alarma.findByPk(req.params.id,{transaction,lock:transaction.LOCK.UPDATE});
+    if(!item)require('../utils/validation').fail('No se encontró la alarma.',404);
+    if(item.estadoAlarma==='Activa'){
+      await item.update({estadoAlarma:'Reconocida',idUsuario:req.usuario.idUsuario,fechaReconocimiento:new Date()},{transaction});
+      await Auditoria.create({accionRealizada:`Alarma reconocida #${item.idAlarma}`,tablaAfectada:'alarma',idUsuario:req.usuario.idUsuario,ipOrigen:req.ip},{transaction});
+    }return item;
+  });
   // Se recarga con las asociaciones para devolver nombre de regla y de quién reconoció,
   // en vez de las instancias "vacías" que quedan tras un save() sin include.
   await alarma.reload({

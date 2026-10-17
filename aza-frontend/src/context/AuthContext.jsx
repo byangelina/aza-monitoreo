@@ -25,7 +25,9 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const onUnauthorized = () => setUser(null);
     window.addEventListener('aza:unauthorized', onUnauthorized);
-    return () => window.removeEventListener('aza:unauthorized', onUnauthorized);
+    const onStorage=e=>{if(e.key==='aza-token'){if(!e.newValue)setUser(null);else api.get('/auth/me').then(({data})=>setUser(toAppUser(data.user))).catch(()=>setUser(null));}};
+    window.addEventListener('storage',onStorage);
+    return () => {window.removeEventListener('aza:unauthorized', onUnauthorized);window.removeEventListener('storage',onStorage);};
   }, []);
 
   useEffect(() => {
@@ -41,6 +43,16 @@ export function AuthProvider({ children }) {
       setInitializing(false);
     })();
   }, []);
+
+  useEffect(()=>{
+    if(!user)return;
+    let lastActivity=Date.now();
+    const touch=()=>{lastActivity=Date.now();};
+    const events=['pointerdown','keydown','touchstart'];events.forEach(event=>window.addEventListener(event,touch,{passive:true}));
+    const timeout=Math.max(1,Number(import.meta.env.VITE_IDLE_MINUTES)||30)*60000;
+    const timer=setInterval(()=>{if(Date.now()-lastActivity>=timeout)logout();},10000);
+    return()=>{clearInterval(timer);events.forEach(event=>window.removeEventListener(event,touch));};
+  },[user?.id]);
 
   async function login(correo, password) {
     const { data } = await api.post('/auth/login', { correo, password });
@@ -67,7 +79,8 @@ export function AuthProvider({ children }) {
   }
 
   async function changePassword(passwordActual, passwordNueva) {
-    await api.post('/auth/cambiar-password', { passwordActual, passwordNueva });
+    const {data}=await api.post('/auth/cambiar-password', { passwordActual, passwordNueva });
+    if(data.token)setToken(data.token);
     setUser((prev) => (prev ? { ...prev, mustChange: false } : prev));
   }
 

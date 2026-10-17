@@ -16,6 +16,8 @@ function serializar(inspeccion) {
     estado: inspeccion.estadoResultado, // dato de origen: nunca se recalcula desde el ángulo.
     limiteMin: inspeccion.limiteMinSnapshot === null ? null : Number(inspeccion.limiteMinSnapshot),
     limiteMax: inspeccion.limiteMaxSnapshot === null ? null : Number(inspeccion.limiteMaxSnapshot),
+    imagenAnalisisUrl: inspeccion.imagenAnalisisUrl || null,
+    imagenCapturaUrl: inspeccion.imagenCapturaUrl || null,
     observacion: inspeccion.observacion,
     receta: inspeccion.receta ? { id: inspeccion.receta.idReceta, nombre: inspeccion.receta.nombreReceta } : null,
     lote: inspeccion.batch?.lote ? { id: inspeccion.batch.lote.idLote, codigo: inspeccion.batch.lote.codigoLote } : null,
@@ -34,42 +36,16 @@ async function listarRecientes(req, res) {
   const items = await Inspeccion.findAll({
     where: { fechaHora: { [Op.gte]: desde } },
     include: INCLUDE_CONTEXTO,
-    order: [['fechaHora', 'DESC']],
+    order: [['fechaHora', 'DESC'], ['idInspeccion', 'DESC']],
   });
   res.json({ items: items.map(serializar) });
 }
 
 // RF015 / RNF021: histórico filtrado y paginado (Supervisor, Área de Calidad, Administrador).
 async function listarHistorico(req, res) {
-  const { desde, hasta, idReceta, idLote, idBatch, estado } = req.query;
-  const page = Math.max(1, Number(req.query.page || 1));
-  const pageSize = Math.min(200, Math.max(1, Number(req.query.pageSize || 50)));
-
-  const where = {};
-  if (desde || hasta) {
-    where.fechaHora = {};
-    if (desde) where.fechaHora[Op.gte] = new Date(desde);
-    if (hasta) where.fechaHora[Op.lte] = new Date(hasta);
-  }
-  if (idReceta) where.idReceta = idReceta;
-  if (idBatch) where.idBatch = idBatch;
-  if (estado) where.estadoResultado = estado;
-
-  const include = [...INCLUDE_CONTEXTO];
-  if (idLote) {
-    include[0] = { ...include[0], where: { idLote }, required: true };
-  }
-
-  const { rows, count } = await Inspeccion.findAndCountAll({
-    where,
-    include,
-    order: [['fechaHora', 'DESC']],
-    limit: pageSize,
-    offset: (page - 1) * pageSize,
-    distinct: true,
-  });
-
-  res.json({ items: rows.map(serializar), page, pageSize, total: count });
+  const pg=require('../utils/validation').pagination(req.query);
+  const {rows,count}=await Inspeccion.findAndCountAll({...require('../utils/historyQuery').historyQuery(req.query),limit:pg.limit,offset:pg.offset,distinct:true});
+  res.json({items:rows.map(serializar),page:pg.page,pageSize:pg.pageSize,total:count});
 }
 
 async function obtenerDetalle(req, res) {
@@ -85,19 +61,18 @@ async function obtenerDetalle(req, res) {
 // se conserva como un registro de texto con formato "[usuario · fecha] texto" por línea.
 async function agregarObservacion(req, res) {
   const { texto } = req.body;
-  if (!texto || !texto.trim() || texto.trim().length > 500) {
+  if (typeof texto !== 'string' || !texto.trim() || texto.trim().length > 500) {
     return res.status(400).json({ error: 'Escribe una observación de entre 1 y 500 caracteres.' });
   }
 
-  const inspeccion = await Inspeccion.findByPk(req.params.id);
-  if (!inspeccion) return res.status(404).json({ error: 'La inspección no está disponible.' });
-
-  const linea = `[${req.usuario.nombreCompleto} · ${new Date().toISOString()}] ${texto.trim()}`;
-  inspeccion.observacion = inspeccion.observacion ? `${inspeccion.observacion}\n${linea}` : linea;
-  await inspeccion.save();
-
-  await registrarAuditoria({ accion: 'Observación agregada a inspección', tabla: 'inspeccion', idUsuario: req.usuario.idUsuario, ip: req.ip });
-  res.json({ item: serializar(inspeccion) });
+  const {sequelize,Auditoria}=require('../models');
+  const item=await sequelize.transaction(async transaction=>{
+    const inspeccion=await Inspeccion.findByPk(req.params.id,{transaction,lock:transaction.LOCK.UPDATE});
+    if(!inspeccion)require('../utils/validation').fail('La inspección no está disponible.',404);
+    const linea=`[${req.usuario.nombreCompleto} · ${new Date().toISOString()}] ${texto.trim().replace(/\r?\n/g,' ')}`;
+    await inspeccion.update({observacion:[inspeccion.observacion,linea].filter(Boolean).join('\n')},{transaction});
+    await Auditoria.create({accionRealizada:`Observación agregada #${inspeccion.idInspeccion}`,tablaAfectada:'inspeccion',idUsuario:req.usuario.idUsuario,ipOrigen:req.ip},{transaction});return inspeccion;
+  });res.json({item:serializar(item)});
 }
 
 module.exports = { listarRecientes, listarHistorico, obtenerDetalle, agregarObservacion, serializar, INCLUDE_CONTEXTO };

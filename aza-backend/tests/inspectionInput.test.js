@@ -1,0 +1,5 @@
+const test=require('node:test');const assert=require('node:assert/strict');
+const {inspectionInput,imageUrl}=require('../src/utils/inspectionInput');
+test('rechaza ángulos ausentes, vacíos y fuera de rango sin convertirlos a cero',()=>{for(const angulo of [null,undefined,'',false,{},-1,361,Infinity])assert.throws(()=>inspectionInput({angulo}));assert.equal(inspectionInput({angulo:0}).angulo,0);});
+test('no permite protocolos ejecutables o credenciales en imágenes',()=>{for(const url of ['javascript:alert(1)','file:///C:/secret.jpg','data:image/svg+xml,a','https://user:secret@example.com/a'])assert.throws(()=>imageUrl(url));assert.equal(imageUrl('https://example.com/capture.jpg'),'https://example.com/capture.jpg');assert.equal(imageUrl(null),null);});
+test('recibe imágenes independientes sin alterar ángulo ni validar por receta',()=>{const item=inspectionInput({angulo:276.54,fecha:'2026-10-17T12:00:00Z',imagenAnalisisUrl:'https://example.com/a.png',imagenCapturaUrl:'https://example.com/b.png'});assert.equal(item.angulo,276.54);assert.notEqual(item.imagenAnalisisUrl,item.imagenCapturaUrl);assert.throws(()=>inspectionInput({angulo:270,fecha:'invalid'}));});

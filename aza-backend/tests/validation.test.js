@@ -1,0 +1,5 @@
+const test=require('node:test'),assert=require('node:assert/strict');
+const {dates,number,pagination}=require('../src/utils/validation');const {Op}=require('sequelize');const {csvCell}=require('../src/controllers/reportController');
+test('Fechas de Santiago incluyen el día completo, incluso en cambio horario',()=>{const range=dates({desde:'2026-09-06',hasta:'2026-09-06'});assert.equal(new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago'}).format(range[Op.gte]),'2026-09-06');assert.equal(new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago'}).format(range[Op.lte]),'2026-09-06');assert.throws(()=>dates({desde:'2026-12-01',hasta:'2026-01-01'}));});
+test('Validación estricta de números y paginación',()=>{for(const n of [null,undefined,'',[],{},true])assert.throws(()=>number(n,'Valor'));assert.equal(number('0','Valor'),0);assert.throws(()=>pagination({pageSize:201}));assert.throws(()=>pagination({page:0}));});
+test('CSV escapa comillas y neutraliza fórmulas de celdas',()=>{assert.equal(csvCell('a"b'),'"a""b"');assert.equal(csvCell('=SUM(A1)'),'"\'=SUM(A1)"');});

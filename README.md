@@ -99,3 +99,9 @@ Restaurar primero en una base vacía separada con `pg_restore --no-owner --dbnam
 `render.yaml` conserva el esquema de servicios frontend/backend; requiere configurar una conexión PostgreSQL vigente, URLs públicas, HTTPS y SMTP. Ejecutar creación inicial de tablas/migraciones antes de servir una base nueva. Revisar permisos del usuario de ejecución y separar credenciales de migración. La configuración Supabase anterior no es válida y no permite publicar esta instancia con esos valores.
 
 No se ha publicado esta versión ni se ha certificado disponibilidad, carga de producción, compatibilidad con Chrome o integración de cámara/SMTP reales. Las pruebas realizadas corresponden a Edge y PostgreSQL local. Rendimiento, 50 usuarios simultáneos, disponibilidad 99%, respaldos diarios operativos y políticas de retención requieren su validación en la infraestructura final.
+
+### Certificado TLS de Supabase en Render
+
+Si el arranque informa `self-signed certificate in certificate chain`, descargar el certificado CA desde Supabase > Database Settings > SSL Configuration. En Render > aza-backend > Environment, agregar `DB_SSL_CA` con el contenido PEM completo (BEGIN CERTIFICATE hasta END CERTIFICATE), conservando `DB_SSL=true`. Alternativamente, cargar el certificado como archivo y configurar `DB_SSL_CA_FILE` con su ruta absoluta. Usar solo una de estas opciones. Se mantiene la verificación del certificado y del hostname; no usar NODE_TLS_REJECT_UNAUTHORIZED=0. El certificado CA es público y no es una contraseña ni una clave privada.
+
+Referencia: https://supabase.com/docs/guides/platform/ssl-enforcement

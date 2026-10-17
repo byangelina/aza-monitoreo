@@ -19,6 +19,8 @@ module.exports = {
     user: process.env.DB_USER || 'aza_app',
     password: process.env.DB_PASSWORD || '',
     ssl: process.env.DB_SSL === 'true',
+    sslCa: process.env.DB_SSL_CA || '',
+    sslCaFile: process.env.DB_SSL_CA_FILE || '',
   },
 
   auth: {

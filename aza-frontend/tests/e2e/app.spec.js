@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './coverage-fixture.js';
 async function fixture(page,role='Operador',count=1){
   const user={id:1,nombre:'Operador QA',correo:'qa@example.com',rol:role,debeCambiarPassword:false};
   const items=Array.from({length:count},(_,i)=>({id:count-i,fechaHora:new Date(Date.now()-i*1000).toISOString(),angulo:276.54,estado:'Rechazado',limiteMin:270,limiteMax:280,receta:{id:1,nombre:'Alambrón 6 mm'},lote:{codigo:'L-001'},batch:{numero:'B-001'},observacion:null}));

@@ -7,6 +7,7 @@ const { signAccessToken, revokeToken, signResetToken, verifyResetToken } = requi
 const { sendPasswordResetEmail } = require('../utils/mailer');
 const { registrarAuditoria } = require('../utils/auditLogger');
 const env = require('../config/env');
+const { isRecoveryEmail } = require('../utils/recoveryEmail');
 
 const GENERIC_LOGIN_ERROR = 'Credenciales incorrectas. Revisa los datos e inténtalo otra vez.'; // RNF009
 
@@ -69,7 +70,7 @@ async function me(req, res) {
 
 async function recuperar(req, res) {
   const { correo } = req.body;
-  if (typeof correo!=='string'||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return res.status(400).json({ error: 'Indica un correo electrónico.' });
+  if (!isRecoveryEmail(correo)) return res.status(400).json({ error: 'Indica un correo electrónico.' });
 
   const usuario = await Usuario.findOne({ where: { correo: String(correo).trim().toLowerCase() } });
 

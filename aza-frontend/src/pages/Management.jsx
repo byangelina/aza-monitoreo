@@ -22,7 +22,7 @@ export default function Management({resource}){
  function open(item){setEditor(item||{});setForm(item?{...item,fechaFinEstimada:item.fechaFinEstimada?.slice(0,10)||''}:{estado:true,activo:true,idRol:catalog.roles.find(r=>r.nombreRol==='Operador')?.idRol||'',idReceta:catalog.recipes.find(r=>r.activa)?.id||'',idLote:catalog.lots.find(l=>l.estado==='Abierto')?.id||'',tipoRegla:'Resultado rechazado',cantidadEventos:3,valorUmbral:280});setFormError('');}
  function changed(){setVersion(n=>n+1);reloadContext(true);setSuccess('Cambios guardados correctamente.');}
  async function persist(){setSaving(true);setFormError('');try{const id=editor[ids[resource]];await api[id?'put':'post']('/gestion/'+resource+(id?'/'+id:''),form);setEditor(null);setConfirmation(null);changed();}catch(e){setFormError(e.message);setConfirmation(null);}finally{setSaving(false);}}
- function submit(e){e.preventDefault();if(editor[ids[resource]])setConfirmation({title:'Confirmar cambios',message:'Se actualizará este registro. Sus relaciones históricas se conservarán.',run:persist});else persist();}
+ async function submit(e){e.preventDefault();if(editor[ids[resource]])setConfirmation({title:'Confirmar cambios',message:'Se actualizará este registro. Sus relaciones históricas se conservarán.',run:persist});else await persist();}
  async function action(path,body,method='post'){setSaving(true);try{await api[method](path,body);setConfirmation(null);changed();}catch(e){setError(e.message);setConfirmation(null);}finally{setSaving(false);}}
  const recipeOptions=catalog.recipes.map(r=>[r.id,r.nombre+(r.activa?'':' (inactiva)')]);const lotOptions=catalog.lots.map(l=>[l.id,l.codigo+' · '+l.estado]);const roleOptions=catalog.roles.map(r=>[r.idRol,r.nombreRol]);
  let fields=[];

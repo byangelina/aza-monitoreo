@@ -1,13 +1,18 @@
 const assert=require('node:assert/strict'),fs=require('fs');
 const env=require('../src/config/env'),db=require('../src/config/database');
 if(env.db.url||env.db.host!=='127.0.0.1'||env.db.name!=='aza_pruebas')throw new Error('Esta prueba solo se permite en aza_pruebas local.');
+const crypto=require('node:crypto');
+const makeCredential=()=>crypto.randomBytes(24).toString('base64url')+'aA1!';
+const initialCredential=makeCredential(),changedCredential=makeCredential(),wrongCredential=makeCredential(),recoveredCredential=makeCredential(),reusedCredential=makeCredential();
+const demoCredential=process.env.AZA_QA_DEMO_PASSWORD;
+if(!demoCredential)throw new Error('Configura AZA_QA_DEMO_PASSWORD para las cuentas demo locales.');
 const checks=[],base='http://127.0.0.1:4000/api',tag='QA'+Date.now();
 async function request(path,{token,body,key,method='GET',status=200,raw=false}={}){
  const r=await fetch(base+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{}),...(key?{'x-api-key':key}:{})},...(body?{body:JSON.stringify(body)}:{})});
  const bytes=Buffer.from(await r.arrayBuffer());let data={};if(!raw&&bytes.length)data=JSON.parse(bytes.toString());assert.equal(r.status,status,`${method} ${path}: ${raw?'':JSON.stringify(data)}`);return raw?bytes:data;
 }
 const pass=title=>{checks.push(title);console.log('OK',title);};
-async function login(correo,password='Demo2026!'){return request('/auth/login',{method:'POST',body:{correo,password}});}
+async function login(correo,password=demoCredential){return request('/auth/login',{method:'POST',body:{correo,password}});}
 (async()=>{
  const admin=(await login('admin@demo.example')).token,supervisor=(await login('supervisor@demo.example')).token,quality=(await login('calidad@demo.example')).token,operator=(await login('operador@demo.example')).token;
  pass('Cuatro roles acceden con sesión real');
@@ -40,15 +45,15 @@ async function login(correo,password='Demo2026!'){return request('/auth/login',{
  const report=await request('/reportes?idLote='+lot.id,{token:supervisor});assert.equal(report.summary.total,2);assert.equal(report.summary.rechazadas,2);
  const csv=await request('/reportes?idLote='+lot.id+'&formato=csv',{token:quality,raw:true});assert.ok(csv.toString().includes(tag));
  const pdf=await request('/reportes?idLote='+lot.id+'&formato=pdf',{token:quality,raw:true});assert.ok(pdf.subarray(0,4).toString()==='%PDF');fs.writeFileSync('../.local/reporte-verificado.pdf',pdf);pass('Reporte filtrado, CSV y PDF reales');
- const roles=(await request('/gestion/roles',{token:admin})).items;const role=roles.find(r=>r.nombreRol==='Operador');const account={nombreCompleto:tag,correo:tag.toLowerCase()+'@demo.example',idRol:role.idRol,password:'Temporal2026!',estado:true};
+ const roles=(await request('/gestion/roles',{token:admin})).items;const role=roles.find(r=>r.nombreRol==='Operador');const account={nombreCompleto:tag,correo:tag.toLowerCase()+'@demo.example',idRol:role.idRol,password:initialCredential,estado:true};
  const created=await request('/gestion/usuarios',{token:admin,method:'POST',body:account,status:201});const temp=await login(account.correo,account.password);assert.equal(temp.user.debeCambiarPassword,true);await request('/inspecciones/recientes',{token:temp.token,status:403});
- const changed=await request('/auth/cambiar-password',{token:temp.token,method:'POST',body:{passwordActual:account.password,passwordNueva:'Definitiva2026!'}});await request('/auth/me',{token:temp.token,status:401});await request('/inspecciones/recientes',{token:changed.token});
- for(let n=0;n<5;n++)await request('/auth/login',{method:'POST',body:{correo:account.correo,password:'Incorrecta2026!'},status:401});
- await request('/auth/login',{method:'POST',body:{correo:account.correo,password:'Definitiva2026!'},status:423});await request('/gestion/usuarios/'+created.id+'/desbloquear',{token:admin,method:'POST'});
- const unlocked=await login(account.correo,'Definitiva2026!');assert.ok(unlocked.token);pass('Usuarios, cambio inicial obligatorio, bloqueo y desbloqueo');
+ const changed=await request('/auth/cambiar-password',{token:temp.token,method:'POST',body:{passwordActual:account.password,passwordNueva:changedCredential}});await request('/auth/me',{token:temp.token,status:401});await request('/inspecciones/recientes',{token:changed.token});
+ for(let n=0;n<5;n++)await request('/auth/login',{method:'POST',body:{correo:account.correo,password:wrongCredential},status:401});
+ await request('/auth/login',{method:'POST',body:{correo:account.correo,password:changedCredential},status:423});await request('/gestion/usuarios/'+created.id+'/desbloquear',{token:admin,method:'POST'});
+ const unlocked=await login(account.correo,changedCredential);assert.ok(unlocked.token);pass('Usuarios, cambio inicial obligatorio, bloqueo y desbloqueo');
  const recovery=await request('/auth/recuperar',{method:'POST',body:{correo:account.correo}});assert.ok(recovery.localPreview);const reset=new URL(recovery.previewUrl).searchParams.get('token');
- await request('/auth/restablecer',{method:'POST',body:{token:reset,password:'Recuperada2026!'}});await request('/auth/restablecer',{method:'POST',body:{token:reset,password:'OtraClave2026!'},status:400});await request('/auth/me',{token:unlocked.token,status:401});pass('Recuperación local, enlace de un solo uso e invalidación de sesiones');
- const active=await login(account.correo,'Recuperada2026!');await request('/gestion/usuarios/'+created.id,{token:admin,method:'PUT',body:{...account,estado:false}});await request('/auth/me',{token:active.token,status:401});await request('/auth/login',{method:'POST',body:{correo:account.correo,password:'Recuperada2026!'},status:401});pass('Baja lógica de usuario conserva histórico y revoca sesión');
+ await request('/auth/restablecer',{method:'POST',body:{token:reset,password:recoveredCredential}});await request('/auth/restablecer',{method:'POST',body:{token:reset,password:reusedCredential},status:400});await request('/auth/me',{token:unlocked.token,status:401});pass('Recuperación local, enlace de un solo uso e invalidación de sesiones');
+ const active=await login(account.correo,recoveredCredential);await request('/gestion/usuarios/'+created.id,{token:admin,method:'PUT',body:{...account,estado:false}});await request('/auth/me',{token:active.token,status:401});await request('/auth/login',{method:'POST',body:{correo:account.correo,password:recoveredCredential},status:401});pass('Baja lógica de usuario conserva histórico y revoca sesión');
  const audits=await request('/gestion/auditoria?accion=Creaci%C3%B3n',{token:admin});assert.ok(audits.total>0);assert.ok(!JSON.stringify(audits).includes('passwordHash'));
  const self=(await request('/auth/me',{token:admin})).user;await request('/gestion/usuarios/'+self.id,{token:admin,method:'PUT',body:{nombreCompleto:self.nombre,correo:self.correo,idRol:roles.find(r=>r.nombreRol==='Administrador').idRol,estado:false},status:409});pass('Auditoría de solo lectura y protección del administrador');
  fs.writeFileSync('../.local/verificacion-completa.json',JSON.stringify({at:new Date().toISOString(),database:'aza_pruebas',passed:checks,tag},null,2));console.log('TOTAL:',checks.length,'grupos aprobados');

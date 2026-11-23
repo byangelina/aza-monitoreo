@@ -31,7 +31,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    (async () => {
+    // The effect cannot await; initialization handles its own request failure.
+    void (async () => {
       if (getToken()) {
         try {
           const { data } = await api.get('/auth/me');
@@ -50,7 +51,7 @@ export function AuthProvider({ children }) {
     const touch=()=>{lastActivity=Date.now();};
     const events=['pointerdown','keydown','touchstart'];events.forEach(event=>window.addEventListener(event,touch,{passive:true}));
     const timeout=Math.max(1,Number(import.meta.env.VITE_IDLE_MINUTES)||30)*60000;
-    const timer=setInterval(()=>{if(Date.now()-lastActivity>=timeout)logout();},10000);
+    const timer=setInterval(()=>{if(Date.now()-lastActivity>=timeout)void logout();},10000);
     return()=>{clearInterval(timer);events.forEach(event=>window.removeEventListener(event,touch));};
   },[user?.id]);
 

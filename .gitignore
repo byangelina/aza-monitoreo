@@ -9,3 +9,5 @@ playwright-report/
 AZA_Contexto_Revisado.md
 
 .local/
+
+coverage/
